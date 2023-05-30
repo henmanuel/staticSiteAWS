@@ -1,0 +1,102 @@
+---
+Description: CORE-SAM BY LOOPS
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  AppName:
+    Type: String
+    Description: example.com
+  Environment:
+    Type: String
+    Default: dev
+    Description: Environment name (e.g. dev, test, prod)
+  HostedZoneId:
+    Type: String
+    Default: Z2FDTNDATAQYW2
+    Description: Aliases hosted zone ID
+Resources:
+  APPBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: PublicRead
+      BucketName: !Ref AppName
+      CorsConfiguration:
+        CorsRules:
+          - AllowedMethods:
+              - GET
+            AllowedOrigins:
+              - '*'
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: 404.html
+  APPBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref APPBucket
+      PolicyDocument:
+        Statement:
+          - Effect: 'Allow'
+            Principal: '*'
+            Action:
+              - 's3:GetObject'
+            Resource: !Sub '${APPBucket.Arn}/*'
+  Certificate:
+    DependsOn: APPBucket
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref AppName
+      DomainValidationOptions:
+        - DomainName: !Ref AppName
+          ValidationDomain: !Ref AppName
+  CloudfrontDistribution:
+    DependsOn: Certificate
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: Frontend
+        Enabled: true
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt APPBucket.DomainName
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        Aliases:
+          - !Ref AppName
+        DefaultRootObject: index.html
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: '/index.html'
+            ErrorCachingMinTTL: 5
+          - ErrorCode: 404
+            ResponseCode: 200
+            ErrorCachingMinTTL: 5
+            ResponsePagePath: '/index.html'
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+          DefaultTTL: 5
+          MinTTL: 0
+          MaxTTL: 5
+          ForwardedValues:
+            QueryString: false
+          Compress: true
+        HttpVersion: http2
+        ViewerCertificate:
+          SslSupportMethod: sni-only
+          AcmCertificateArn: !Ref Certificate
+  APPDomainRecord:
+    DependsOn: CloudfrontDistribution
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      RecordSets:
+        - Name: !Ref AppName
+          Type: A
+          AliasTarget:
+            HostedZoneId: !Ref HostedZoneId
+            DNSName: !GetAtt CloudfrontDistribution.DomainName

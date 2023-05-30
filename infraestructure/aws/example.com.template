@@ -1,0 +1,220 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Transform": "AWS::Serverless-2016-10-31",
+  "Description": "CORE-WEB-APP BY LOOPS",
+  "Parameters": {
+    "AppName": {
+      "Type": "String",
+      "Default": "new.loops.app",
+      "Description": "Name of the app in S3 bucket to create"
+    },
+    "Environment": {
+      "Default": "",
+      "Type": "String",
+      "Description": "Environment to deploy to"
+    },
+    "Region": {
+      "Type": "String",
+      "Default": "us-east-1",
+      "AllowedValues": [
+        "us-east-1",
+        "us-east-2",
+        "us-west-1",
+        "us-west-2",
+        "ap-south-1",
+        "ap-northeast-2",
+        "ap-southeast-1",
+        "ap-southeast-2",
+        "ap-northeast-1",
+        "ca-central-1",
+        "eu-central-1",
+        "eu-west-1",
+        "eu-west-2",
+        "sa-east-1"
+      ],
+      "Description": "Region to deploy to"
+    }
+  },
+  "Resources": {
+    "APPBucket": {
+      "Type": "AWS::S3::Bucket",
+      "Properties": {
+        "BucketName": {
+          "Fn::Sub": "${Environment}${AppName}"
+        },
+        "WebsiteConfiguration": {
+          "IndexDocument": "index.html"
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": "false"
+        }
+      }
+    },
+    "APPBucketPolicy": {
+      "Type": "AWS::S3::BucketPolicy",
+      "Properties": {
+        "Bucket": {
+          "Ref": "APPBucket"
+        },
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "s3:GetObject*",
+                "s3:PutObject*",
+                "s3:DeleteObject*"
+              ],
+              "Principal": "*",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Sub": "arn:aws:s3:::${Environment}${AppName}/*"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "HostedZone": {
+      "Type": "AWS::Route53::HostedZone",
+      "Properties": {
+        "Name": {
+          "Fn::Sub": "${Environment}${AppName}"
+        }
+      }
+    },
+    "Certificate": {
+      "DependsOn": [
+        "HostedZone"
+      ],
+      "Type": "AWS::CertificateManager::Certificate",
+      "Properties": {
+        "ValidationMethod": "DNS",
+        "DomainName": {
+          "Fn::Sub": "${Environment}${AppName}"
+        },
+        "SubjectAlternativeNames": [
+          {
+            "Fn::Sub": "*.${Environment}${AppName}"
+          }
+        ],
+        "DomainValidationOptions": [
+          {
+            "DomainName": {
+              "Fn::Sub": "${Environment}${AppName}"
+            },
+            "ValidationDomain": {
+              "Fn::Sub": "${Environment}${AppName}"
+            }
+          }
+        ]
+      }
+    },
+    "CloudfrontDistribution": {
+      "DependsOn": [
+        "Certificate"
+      ],
+      "Type": "AWS::CloudFront::Distribution",
+      "Properties": {
+        "DistributionConfig": {
+          "Origins": [
+            {
+              "Id": "S3Origin",
+              "S3OriginConfig": {
+                "OriginAccessIdentity": ""
+              },
+              "DomainName": {
+                "Fn::GetAtt": [
+                  "APPBucket",
+                  "DomainName"
+                ]
+              }
+            }
+          ],
+          "Aliases": [
+            {
+              "Fn::Sub": [
+                "${Environment}${AppName}",
+                {
+                  "Environment": {
+                    "Ref": "Environment"
+                  },
+                  "AppName": {
+                    "Ref": "AppName"
+                  }
+                }
+              ]
+            }
+          ],
+          "Enabled": "true",
+          "DefaultRootObject": "index.html",
+          "DefaultCacheBehavior": {
+            "MinTTL": "0",
+            "MaxTTL": "5",
+            "DefaultTTL": "5",
+            "Compress": "true",
+            "TargetOriginId": "S3Origin",
+            "ViewerProtocolPolicy": "redirect-to-https",
+            "AllowedMethods": [
+              "GET",
+              "HEAD",
+              "OPTIONS"
+            ],
+            "ForwardedValues": {
+              "QueryString": "false",
+              "Cookies": {
+                "Forward": "none"
+              }
+            }
+          },
+          "ViewerCertificate": {
+            "SslSupportMethod": "sni-only",
+            "AcmCertificateArn": {
+              "Ref": "Certificate"
+            }
+          }
+        }
+      }
+    },
+    "APPDomainRecord": {
+      "DependsOn": [
+        "CloudfrontDistribution"
+      ],
+      "Type": "AWS::Route53::RecordSetGroup",
+      "Properties": {
+        "HostedZoneId": {
+          "Fn::GetAtt": [
+            "HostedZone",
+            "Id"
+          ]
+        },
+        "RecordSets": [
+          {
+            "Type": "A",
+            "Name": {
+              "Fn::Sub": [
+                "${Environment}${AppName}",
+                {
+                  "Environment": {
+                    "Ref": "Environment"
+                  },
+                  "AppName": {
+                    "Ref": "AppName"
+                  }
+                }
+              ]
+            },
+            "AliasTarget": {
+              "DNSName": {
+                "Fn::GetAtt": [
+                  "CloudfrontDistribution",
+                  "DomainName"
+                ]
+              },
+              "HostedZoneId": "Z2FDTNDATAQYW2"
+            }
+          }
+        ]
+      }
+    }
+  }
+}
